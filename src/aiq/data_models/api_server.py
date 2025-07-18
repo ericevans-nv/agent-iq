@@ -408,7 +408,7 @@ class WebSocketUserInteractionResponseMessage(BaseModel):
     """
     type: typing.Literal[WebSocketMessageType.USER_INTERACTION_MESSAGE]
     id: str = "default"
-    thread_id: str = "default"
+    thread_id: str = "default"  # TODO EE: Update
     content: UserMessageContent
     user: User = User()
     security: Security = Security()

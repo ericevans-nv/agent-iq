@@ -313,7 +313,7 @@ class MessageValidator:
         message_type: Literal[WebSocketMessageType.SYSTEM_INTERACTION_MESSAGE] = (
             WebSocketMessageType.SYSTEM_INTERACTION_MESSAGE),
         message_id: str | None = str(uuid.uuid4()),
-        thread_id: str = "default",
+        thread_id: str = "default",  # TODO EE: Update
         parent_id: str = "default",
         content: HumanPrompt,
         status: WebSocketMessageStatus = WebSocketMessageStatus.IN_PROGRESS,

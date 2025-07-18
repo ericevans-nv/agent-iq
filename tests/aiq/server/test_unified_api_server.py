@@ -138,7 +138,7 @@ system_response_token_message_with_error_content = {
 user_interaction_response_message = {
     "type": "user_interaction_message",
     "id": "string",
-    "thread_id": "string",
+    "thread_id": "string",  # TODO EE: Update
     "content": {
         "messages": [{
             "role": "user", "content": [{
@@ -161,7 +161,7 @@ user_interaction_response_message = {
 system_intermediate_step_message = {
     "type": "system_intermediate_message",
     "id": "step_789",
-    "thread_id": "thread_456",
+    "thread_id": "thread_456",  # TODO EE: Update
     "parent_id": "id from user message",
     "intermediate_parent_id": "default",
     "content": {
@@ -175,7 +175,7 @@ system_intermediate_step_message = {
 system_interaction_text_message = {
     "type": "system_interaction_message",
     "id": "interaction_303",
-    "thread_id": "thread_456",
+    "thread_id": "thread_456",  # TODO EE: Update
     "parent_id": "id from user message",
     "content": {
         "input_type": "text", "text": "Ask anything.", "placeholder": "What can you do?", "required": True

@@ -133,7 +133,7 @@ Definition: This message contains the response content from the human in the loo
 {
   "type": "user_interaction_message",
   "id": "string",
-  "thread_id": "string",
+  "conversation_id": "string", # TODO EE: Update
   "parent_id": "string",
   "content": {
     "messages": [
@@ -169,7 +169,7 @@ Definition: This message contains the intermediate step content from a running w
 {
   "type": "system_intermediate_message",
   "id": "step_789",
-  "thread_id": "thread_456",
+  "conversation_id": "thread_456",
   "parent_id": "id from user message",
   "intermediate_parent_id": "default",
   "content": {
@@ -189,7 +189,7 @@ Definition: This message contains the final response content from a running work
 {
   "type": "system_response_message",
   "id": "token_001",
-  "thread_id": "thread_456",
+  "conversation_id": "thread_456",
   "parent_id": "id from user message",
   "content": {
     "text": "Response token can be json, code block or plain text"
@@ -206,7 +206,7 @@ Definition: This message sends various types of error content to the client.
 {
   "type": "error_message",
   "id": "token_001",
-  "thread_id": "thread_456",
+  "conversation_id": "thread_456",
   "parent_id": "id from user message",
   "content": {
       "code": "111", "message": "ValidationError", "details": "The provided email format is invalid."
@@ -225,7 +225,7 @@ System Human Interaction messages are sent from the server to the client contain
 {
   "type": "system_interaction_message",
   "id": "interaction_303",
-  "thread_id": "thread_456",
+  "conversation_id": "thread_456",
   "parent_id": "id from user message",
   "content": {
       "input_type": "text",
@@ -243,7 +243,7 @@ System Human Interaction messages are sent from the server to the client contain
 {
   "type": "system_interaction_message",
   "id": "interaction_304",
-  "thread_id": "thread_456",
+  "conversation_id": "thread_456",
   "parent_id": "msg_123",
   "content": {
       "input_type": "binary_choice",
@@ -270,7 +270,7 @@ System Human Interaction messages are sent from the server to the client contain
 {
   "type": "system_human_interaction",
   "id": "interaction_305",
-  "thread_id": "thread_456",
+  "conversation_id": "thread_456",
   "parent_id": "msg_123",
   "content": {
     "input_type": "radio",
@@ -308,7 +308,7 @@ System Human Interaction messages are sent from the server to the client contain
 {
   "type": "system_human_interaction_name",
   "id": "interaction_306",
-  "thread_id": "thread_456",
+  "conversation_id": "thread_456",
   "parent_id": "msg_123",
   "content": {
     "input_type": "checkbox",
@@ -346,7 +346,7 @@ System Human Interaction messages are sent from the server to the client contain
 {
   "type": "system_human_interaction",
   "id": "interaction_305",
-  "thread_id": "thread_456",
+  "conversation_id": "thread_456",
   "parent_id": "msg_123",
   "content": {
     "interaction": "system_human_interaction_name",
