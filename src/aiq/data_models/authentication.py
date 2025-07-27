@@ -153,13 +153,19 @@ Credential = typing.Annotated[
 class AuthResult(BaseModel):
     credentials: list[Credential]
     token_expires_at: datetime | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
     raw: dict[str, typing.Any] = {}  # idP / debug blob
 
     model_config = ConfigDict(extra="forbid")
 
     # ---------- helpers -------------------------------------------------------
     def is_expired(self) -> bool:
-        return bool(self.token_expires_at and datetime.now(timezone.utc) >= self.token_expires_at)
+        if (self.access_token and (self.token_expires_at is not None)
+                and (datetime.now(timezone.utc) <= self.token_expires_at)):
+            return True
+        else:
+            return False
 
     def as_requests_kwargs(self) -> dict[str, typing.Any]:
         """Convert to kwargs usable by `requests` / `httpx`."""
@@ -191,3 +197,35 @@ class AuthResult(BaseModel):
                 target_kwargs.setdefault(k, {}).update(v)
             else:
                 target_kwargs[k] = v
+
+
+class HTTPResponse(BaseModel):
+    """
+    Represents the result of an HTTP request including response data, metadata, and authentication context.
+
+    This model encapsulates both the HTTP response details and the authentication result used to make the request,
+    providing a complete context for request/response handling in authenticated workflows.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    status_code: int = Field(description="HTTP status code returned by the server")
+    headers: dict[str, str] = Field(default_factory=dict, description="HTTP response headers")
+    body: typing.Any | None = Field(default=None,
+                                    description="Response body content (JSON dict, plain text, or raw bytes)")
+    cookies: dict[str, str] | None = Field(default=None, description="Cookies returned by the server")
+    content_type: str | None = Field(default=None, description="Content-Type header value")
+    url: str | None = Field(default=None, description="Final URL after any redirects")
+    elapsed: float | None = Field(default=None, description="Request duration in seconds")
+    auth_result: AuthResult | None = Field(default=None, description="Authentication result used for this request")
+
+    def is_success(self) -> bool:
+        """Check if the HTTP response indicates success (2xx status code)."""
+        return 200 <= self.status_code < 300
+
+    def is_client_error(self) -> bool:
+        """Check if the HTTP response indicates a client error (4xx status code)."""
+        return 400 <= self.status_code < 500
+
+    def is_server_error(self) -> bool:
+        """Check if the HTTP response indicates a server error (5xx status code)."""
+        return 500 <= self.status_code < 600

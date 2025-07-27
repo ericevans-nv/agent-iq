@@ -16,5 +16,7 @@
 # pylint: disable=unused-import
 # flake8: noqa
 
+from aiq.tool import authentication_tools
+
 # Import any tools which need to be automatically registered here
 from . import ip_lookup

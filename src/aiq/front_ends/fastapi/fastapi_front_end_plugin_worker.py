@@ -981,6 +981,9 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
                 raise ValueError(f"Unsupported method {endpoint.method}")
 
     async def add_authorization_route(self, app: FastAPI):
+        from datetime import datetime
+        from datetime import timedelta
+        from datetime import timezone
 
         from authlib.integrations.httpx_client import AsyncOAuth2Client
         from fastapi.responses import HTMLResponse
@@ -997,27 +1000,27 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
             Returns:
                 HTMLResponse: A response indicating the success of the authentication flow.
             """
-            state = request.query_params.get("state")
+            authorization_code: str | None = request.query_params.get("code")
+            state: str | None = request.query_params.get("state")
+
             if not state or state not in WebSocketAuthenticationFlowHandler._flows:
                 return "Invalid state. Please restart the authentication process."
 
             flow_state = WebSocketAuthenticationFlowHandler._flows[state]
             config = WebSocketAuthenticationFlowHandler._configs[state]
+            oauth_client: AsyncOAuth2Client = WebSocketAuthenticationFlowHandler._oauth_client[state]
             verifier = flow_state.verifier
 
-            client = AsyncOAuth2Client(client_id=config.client_id,
-                                       client_secret=config.client_secret,
-                                       redirect_uri=config.redirect_uri,
-                                       scope=" ".join(config.scopes) if config.scopes else None,
-                                       token_endpoint=config.token_url,
-                                       token_endpoint_auth_method=config.token_endpoint_auth_method,
-                                       code_challenge_method='S256' if config.use_pkce else None)
-
             try:
-                flow_state.token = await client.fetch_token(url=config.token_url,
-                                                            authorization_response=str(request.url),
-                                                            code_verifier=verifier,
-                                                            state=state)
+                credentials: dict = await oauth_client.fetch_token(url=config.token_url,
+                                                                   code=authorization_code,
+                                                                   code_verifier=verifier,
+                                                                   state=state)
+                flow_state.access_token = credentials.get("access_token")
+                flow_state.expires = (datetime.now(timezone.utc) + timedelta(seconds=credentials.get("expires_in")))
+                flow_state.token_type = credentials.get("token_type")
+                flow_state.refresh_token = credentials.get("refresh_token")
+
             except Exception as e:
                 flow_state.error = e
             finally:

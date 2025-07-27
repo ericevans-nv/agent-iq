@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import asyncio
-import secrets
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -23,6 +22,7 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 
 from aiq.authentication.interfaces import FlowHandlerBase
 from aiq.authentication.oauth2.authorization_code_flow_config import OAuth2AuthorizationCodeFlowConfig
+from aiq.authentication.oauth2.respone_manager import ResponseManager
 from aiq.data_models.authentication import AuthenticatedContext
 from aiq.data_models.authentication import AuthFlowType
 from aiq.data_models.interactive import _HumanPromptOAuthConsent
@@ -30,17 +30,21 @@ from aiq.front_ends.fastapi.fastapi_front_end_controller import _FastApiFrontEnd
 
 
 @dataclass
-class _FlowState:
+class Auth_Code_Cred:
     event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
-    token: dict | None = None
+    access_token: dict | None = None
+    expires: int | None = None
+    token_type: str | None = None
+    refresh_token: str | None = None
     error: Exception | None = None
     challenge: str | None = None
     verifier: str | None = None
 
 
 class WebSocketAuthenticationFlowHandler(FlowHandlerBase):
-    _flows: dict[str, _FlowState] = {}
+    _flows: dict[str, Auth_Code_Cred] = {}
     _configs: dict[str, OAuth2AuthorizationCodeFlowConfig] = {}
+    _oauth_client: dict[str, AsyncOAuth2Client] = {}
     _server_controller: _FastApiFrontEndController | None = None
     _server_lock: asyncio.Lock = asyncio.Lock()
     _active_flows: int = 0
@@ -55,13 +59,15 @@ class WebSocketAuthenticationFlowHandler(FlowHandlerBase):
 
     @staticmethod
     async def _handle_oauth2_auth_code_flow(config: OAuth2AuthorizationCodeFlowConfig) -> AuthenticatedContext:
-        state = secrets.token_urlsafe(16)
-        flow_state = _FlowState()
+        import httpx
+
+        oauth_credentials = Auth_Code_Cred()
 
         client = AsyncOAuth2Client(
             client_id=config.client_id,
             client_secret=config.client_secret,
             redirect_uri=config.redirect_uri,
+            token_endpoint_auth_method="none" if config.use_pkce else "client_secret_post",
             scope=" ".join(config.scopes) if config.scopes else None,
             token_endpoint=config.token_url,
             code_challenge_method='S256' if config.use_pkce else None,
@@ -69,45 +75,62 @@ class WebSocketAuthenticationFlowHandler(FlowHandlerBase):
 
         if config.use_pkce:
             verifier, challenge = pkce.generate_pkce_pair()
-            flow_state.verifier = verifier
-            flow_state.challenge = challenge
+            oauth_credentials.verifier = verifier
+            oauth_credentials.challenge = challenge
 
-        authorization_url, _ = client.create_authorization_url(
-            config.authorization_url,
-            state=state,
-            code_verifier=flow_state.verifier if config.use_pkce else None,
-            code_challenge=flow_state.challenge if config.use_pkce else None
+        authorization_url, state = client.create_authorization_url(
+            url=config.authorization_url,
+            response_type=config.response_type or "code",
+            audience=config.audience,
+            prompt=config.prompt or "consent",
+            access_type=config.access_type,  # optional
+            code_verifier=oauth_credentials.verifier if config.use_pkce else None,
+            code_challenge=oauth_credentials.challenge if config.use_pkce else None,
+            code_challenge_method="S256" if config.use_pkce else None,
+            extra_params=config.extra_authorization_params or {}
         )
 
         async with WebSocketAuthenticationFlowHandler._server_lock:
-            WebSocketAuthenticationFlowHandler._flows[state] = flow_state
             WebSocketAuthenticationFlowHandler._active_flows += 1
+            WebSocketAuthenticationFlowHandler._flows[state] = oauth_credentials
             WebSocketAuthenticationFlowHandler._configs[state] = config
+            WebSocketAuthenticationFlowHandler._oauth_client[state] = client
 
         if WebSocketAuthenticationFlowHandler.web_socket is None:
             raise RuntimeError("WebSocket instance is not available for handling authentication.")
 
-        await WebSocketAuthenticationFlowHandler.web_socket.message_handler.create_websocket_message(
-            _HumanPromptOAuthConsent(text=authorization_url))
+        # Initiates the OAuth 2.0 Authorization Code Grant flow by sending the authorization request.
+        async with httpx.AsyncClient() as client:
+            response = await client.get(authorization_url, timeout=10.0)
+
+        # Handles the response from the authorization request.
+        if response.status_code != 302:
+            await ResponseManager().process_http_response(response)
+        else:
+            redirect_location_header: str | None = response.headers.get("Location")
+            await WebSocketAuthenticationFlowHandler.web_socket.message_handler.create_websocket_message(
+                _HumanPromptOAuthConsent(text=redirect_location_header))
 
         try:
-            await asyncio.wait_for(flow_state.event.wait(), timeout=300)
-        except asyncio.TimeoutError:
-            raise RuntimeError("Authentication flow timed out after 5 minutes.")
+            await asyncio.wait_for(oauth_credentials.event.wait(), timeout=300)
+        except asyncio.TimeoutError as e:
+            raise RuntimeError("Authentication flow timed out after 5 minutes.") from e
         finally:
             async with WebSocketAuthenticationFlowHandler._server_lock:
                 if state in WebSocketAuthenticationFlowHandler._flows:
                     del WebSocketAuthenticationFlowHandler._flows[state]
                 WebSocketAuthenticationFlowHandler._active_flows -= 1
 
-        if flow_state.error:
-            raise RuntimeError(f"Authentication failed: {flow_state.error}") from flow_state.error
-        if not flow_state.token:
+        if oauth_credentials.error:
+            raise RuntimeError(f"Authentication failed: {oauth_credentials.error}") from oauth_credentials.error
+
+        if not oauth_credentials.access_token:
             raise RuntimeError("Authentication failed: Did not receive token.")
 
-        token = flow_state.token
-
-        return AuthenticatedContext(headers={"Authorization": f"Bearer {token['access_token']}"},
-                                    metadata={
-                                        "expires_at": token.get("expires_at"), "raw_token": token
-                                    })
+        return AuthenticatedContext(
+            metadata={
+                "access_token": oauth_credentials.access_token,
+                "token_type": oauth_credentials.token_type,
+                "expires": oauth_credentials.expires,
+                "refresh_token": oauth_credentials.refresh_token
+            })
