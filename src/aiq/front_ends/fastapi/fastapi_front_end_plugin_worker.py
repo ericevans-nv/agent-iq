@@ -23,7 +23,6 @@ from abc import abstractmethod
 from collections.abc import Awaitable
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from functools import partial
 from pathlib import Path
 
 from fastapi import BackgroundTasks
@@ -37,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydantic import Field
+from starlette.websockets import WebSocket
 
 from aiq.builder.workflow_builder import WorkflowBuilder
 from aiq.data_models.api_server import AIQChatRequest
@@ -51,6 +51,8 @@ from aiq.eval.config import EvaluationRunOutput
 from aiq.eval.evaluate import EvaluationRun
 from aiq.eval.evaluate import EvaluationRunConfig
 from aiq.front_ends.fastapi.auth_flow_handlers.http_flow_handler import HTTPAuthenticationFlowHandler
+from aiq.front_ends.fastapi.auth_flow_handlers.websocket_flow_handler import FlowState
+from aiq.front_ends.fastapi.auth_flow_handlers.websocket_flow_handler import WebSocketAuthenticationFlowHandler
 from aiq.front_ends.fastapi.fastapi_front_end_config import AIQAsyncGenerateResponse
 from aiq.front_ends.fastapi.fastapi_front_end_config import AIQAsyncGenerationStatusResponse
 from aiq.front_ends.fastapi.fastapi_front_end_config import AIQEvaluateRequest
@@ -59,11 +61,11 @@ from aiq.front_ends.fastapi.fastapi_front_end_config import AIQEvaluateStatusRes
 from aiq.front_ends.fastapi.fastapi_front_end_config import FastApiFrontEndConfig
 from aiq.front_ends.fastapi.job_store import JobInfo
 from aiq.front_ends.fastapi.job_store import JobStore
+from aiq.front_ends.fastapi.message_handler import WebSocketMessageHandler
 from aiq.front_ends.fastapi.response_helpers import generate_single_response
 from aiq.front_ends.fastapi.response_helpers import generate_streaming_response_as_str
 from aiq.front_ends.fastapi.response_helpers import generate_streaming_response_full_as_str
 from aiq.front_ends.fastapi.step_adaptor import StepAdaptor
-from aiq.front_ends.fastapi.websocket import AIQWebSocket
 from aiq.object_store.models import ObjectStoreItem
 from aiq.runtime.session import AIQSessionManager
 
@@ -82,6 +84,7 @@ class FastApiFrontEndPluginWorkerBase(ABC):
 
         self._cleanup_tasks: list[str] = []
         self._cleanup_tasks_lock = asyncio.Lock()
+        self._http_flow_handler: HTTPAuthenticationFlowHandler | None = HTTPAuthenticationFlowHandler()
 
     @property
     def config(self) -> AIQConfig:
@@ -198,6 +201,12 @@ class RouteInfo(BaseModel):
 
 
 class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
+
+    def __init__(self, config: AIQConfig):
+        super().__init__(config)
+
+        self._outstanding_flows: dict[str, FlowState] = {}
+        self._outstanding_flows_lock = asyncio.Lock()
 
     @staticmethod
     async def _periodic_cleanup(name: str, job_store: JobStore, sleep_time_sec: int = 300):
@@ -515,10 +524,6 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
 
         workflow = session_manager.workflow
 
-        if (endpoint.websocket_path):
-            app.add_websocket_route(endpoint.websocket_path,
-                                    partial(AIQWebSocket, session_manager, self.get_step_adaptor()))
-
         GenerateBodyType = workflow.input_schema  # pylint: disable=invalid-name
         GenerateStreamResponseType = workflow.streaming_output_schema  # pylint: disable=invalid-name
         GenerateSingleResponseType = workflow.single_output_schema  # pylint: disable=invalid-name
@@ -569,8 +574,8 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
 
                 response.headers["Content-Type"] = "application/json"
 
-                async with session_manager.session(
-                        request=request, user_authentication_callback=HTTPAuthenticationFlowHandler.authenticate):
+                async with session_manager.session(request=request,
+                                                   user_authentication_callback=self._http_flow_handler.authenticate):
 
                     return await generate_single_response(None, session_manager, result_type=result_type)
 
@@ -580,8 +585,8 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
 
             async def get_stream(request: Request):
 
-                async with session_manager.session(
-                        request=request, user_authentication_callback=HTTPAuthenticationFlowHandler.authenticate):
+                async with session_manager.session(request=request,
+                                                   user_authentication_callback=self._http_flow_handler.authenticate):
 
                     return StreamingResponse(headers={"Content-Type": "text/event-stream; charset=utf-8"},
                                              content=generate_streaming_response_as_str(
@@ -615,8 +620,8 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
 
                 response.headers["Content-Type"] = "application/json"
 
-                async with session_manager.session(
-                        request=request, user_authentication_callback=HTTPAuthenticationFlowHandler.authenticate):
+                async with session_manager.session(request=request,
+                                                   user_authentication_callback=self._http_flow_handler.authenticate):
 
                     return await generate_single_response(payload, session_manager, result_type=result_type)
 
@@ -629,8 +634,8 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
 
             async def post_stream(request: Request, payload: request_type):
 
-                async with session_manager.session(
-                        request=request, user_authentication_callback=HTTPAuthenticationFlowHandler.authenticate):
+                async with session_manager.session(request=request,
+                                                   user_authentication_callback=self._http_flow_handler.authenticate):
 
                     return StreamingResponse(headers={"Content-Type": "text/event-stream; charset=utf-8"},
                                              content=generate_streaming_response_as_str(
@@ -814,6 +819,54 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
                 logger.info("Found job %s with status %s", job_id, job.status)
                 return _job_status_to_response(job)
 
+        async def websocket_endpoint(websocket: WebSocket):
+
+            # Universal cookie handling: works for both cross-origin and same-origin connections
+            session_id = websocket.query_params.get("session")
+            if session_id:
+                headers = list(websocket.scope.get("headers", []))
+                cookie_header = f"aiqtoolkit-session={session_id}"
+
+                # Check if the session cookie already exists to avoid duplicates
+                cookie_exists = False
+                existing_session_cookie = False
+
+                for i, (name, value) in enumerate(headers):
+                    if name == b"cookie":
+                        cookie_exists = True
+                        cookie_str = value.decode()
+
+                        # Check if aiqtoolkit-session already exists in cookies
+                        if "aiqtoolkit-session=" in cookie_str:
+                            existing_session_cookie = True
+                            logger.info("WebSocket: Session cookie already present in headers (same-origin)")
+                        else:
+                            # Append to existing cookie header (cross-origin case)
+                            headers[i] = (name, f"{cookie_str}; {cookie_header}".encode())
+                            logger.info("WebSocket: Added session cookie to existing cookie header: %s",
+                                        session_id[:10] + "...")
+                        break
+
+                # Add new cookie header only if no cookies exist and no session cookie found
+                if not cookie_exists and not existing_session_cookie:
+                    headers.append((b"cookie", cookie_header.encode()))
+                    logger.info("WebSocket: Added new session cookie header: %s", session_id[:10] + "...")
+
+                # Update the websocket scope with the modified headers
+                websocket.scope["headers"] = headers
+
+            async with WebSocketMessageHandler(websocket, session_manager, self.get_step_adaptor()) as handler:
+
+                flow_handler = WebSocketAuthenticationFlowHandler(self._add_flow, self._remove_flow, handler)
+
+                # Ugly hack to set the flow handler on the message handler. Both need eachother to be set.
+                handler.set_flow_handler(flow_handler)
+
+                await handler.run()
+
+        if (endpoint.websocket_path):
+            app.add_websocket_route(endpoint.websocket_path, websocket_endpoint)
+
         if (endpoint.path):
 
             if (endpoint.method == "GET"):
@@ -981,14 +1034,9 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
                 raise ValueError(f"Unsupported method {endpoint.method}")
 
     async def add_authorization_route(self, app: FastAPI):
-        from datetime import datetime
-        from datetime import timedelta
-        from datetime import timezone
 
-        from authlib.integrations.httpx_client import AsyncOAuth2Client
         from fastapi.responses import HTMLResponse
 
-        from aiq.front_ends.fastapi.auth_flow_handlers.websocket_flow_handler import WebSocketAuthenticationFlowHandler
         from aiq.front_ends.fastapi.html_snippets.auth_code_grant_success import AUTH_REDIRECT_SUCCESS_HTML
 
         async def redirect_uri(request: Request):
@@ -1000,31 +1048,26 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
             Returns:
                 HTMLResponse: A response indicating the success of the authentication flow.
             """
-            authorization_code: str | None = request.query_params.get("code")
-            state: str | None = request.query_params.get("state")
+            state = request.query_params.get("state")
 
-            if not state or state not in WebSocketAuthenticationFlowHandler._flows:
-                return "Invalid state. Please restart the authentication process."
+            async with self._outstanding_flows_lock:
+                if not state or state not in self._outstanding_flows:
+                    return "Invalid state. Please restart the authentication process."
 
-            flow_state = WebSocketAuthenticationFlowHandler._flows[state]
-            config = WebSocketAuthenticationFlowHandler._configs[state]
-            oauth_client: AsyncOAuth2Client = WebSocketAuthenticationFlowHandler._oauth_client[state]
+                flow_state = self._outstanding_flows[state]
+
+            config = flow_state.config
             verifier = flow_state.verifier
+            client = flow_state.client
 
             try:
-                credentials: dict = await oauth_client.fetch_token(url=config.token_url,
-                                                                   code=authorization_code,
-                                                                   code_verifier=verifier,
-                                                                   state=state)
-                flow_state.access_token = credentials.get("access_token")
-                flow_state.expires = (datetime.now(timezone.utc) + timedelta(seconds=credentials.get("expires_in")))
-                flow_state.token_type = credentials.get("token_type")
-                flow_state.refresh_token = credentials.get("refresh_token")
-
+                res = await client.fetch_token(url=config.token_url,
+                                               authorization_response=str(request.url),
+                                               code_verifier=verifier,
+                                               state=state)
+                flow_state.future.set_result(res)
             except Exception as e:
-                flow_state.error = e
-            finally:
-                flow_state.event.set()
+                flow_state.future.set_exception(e)
 
             return HTMLResponse(content=AUTH_REDIRECT_SUCCESS_HTML,
                                 status_code=200,
@@ -1038,3 +1081,11 @@ class FastApiFrontEndPluginWorker(FastApiFrontEndPluginWorkerBase):
             endpoint=redirect_uri,
             methods=["GET"],
             description="Handles the authorization code and state returned from the Authorization Code Grant Flow.")
+
+    async def _add_flow(self, state: str, flow_state: FlowState):
+        async with self._outstanding_flows_lock:
+            self._outstanding_flows[state] = flow_state
+
+    async def _remove_flow(self, state: str):
+        async with self._outstanding_flows_lock:
+            del self._outstanding_flows[state]

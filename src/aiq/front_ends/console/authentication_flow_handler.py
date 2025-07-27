@@ -32,138 +32,196 @@ from aiq.data_models.authentication import AuthFlowType
 from aiq.front_ends.fastapi.fastapi_front_end_controller import _FastApiFrontEndController
 
 
+# --------------------------------------------------------------------------- #
+# Helpers                                                                     #
+# --------------------------------------------------------------------------- #
 @dataclass
 class _FlowState:
-    event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
-    token: dict | None = None
-    error: Exception | None = None
+    future: asyncio.Future = field(default_factory=asyncio.Future, init=False)
     challenge: str | None = None
     verifier: str | None = None
 
 
+# --------------------------------------------------------------------------- #
+# Main handler                                                                #
+# --------------------------------------------------------------------------- #
 class ConsoleAuthenticationFlowHandler(FlowHandlerBase):
-    _flows: dict[str, _FlowState] = {}
-    _server_controller: _FastApiFrontEndController | None = None
-    _server_lock: asyncio.Lock = asyncio.Lock()
-    _active_flows: int = 0
+    """
+    Authentication helper for CLI / console environments.  Supports:
 
-    @staticmethod
-    async def authenticate(config: OAuth2AuthorizationCodeFlowConfig, method: AuthFlowType) -> AuthenticatedContext:
+      • HTTP Basic (username/password)
+      • OAuth 2 Authorization‑Code with optional PKCE
+    """
+
+    # ----------------------------- lifecycle ----------------------------- #
+    def __init__(self) -> None:
+        super().__init__()
+        self._server_controller: _FastApiFrontEndController | None = None
+        self._redirect_app: FastAPI | None = None  # ★ NEW
+        self._flows: dict[str, _FlowState] = {}
+        self._active_flows = 0
+        self._server_lock = asyncio.Lock()
+        self._oauth_client: AsyncOAuth2Client | None = None
+
+    # ----------------------------- public API ---------------------------- #
+    async def authenticate(
+        self,
+        config: OAuth2AuthorizationCodeFlowConfig,
+        method: AuthFlowType,
+    ) -> AuthenticatedContext:
         if method == AuthFlowType.HTTP_BASIC:
-            return ConsoleAuthenticationFlowHandler._handle_http_basic()
-        elif method == AuthFlowType.OAUTH2_AUTHORIZATION_CODE:
-            return await ConsoleAuthenticationFlowHandler._handle_oauth2_auth_code_flow(config)
+            return self._handle_http_basic()
+        if method == AuthFlowType.OAUTH2_AUTHORIZATION_CODE:
+            return await self._handle_oauth2_auth_code_flow(config)
 
-        raise NotImplementedError(f"Authentication method '{method}' is not supported by the console frontend.")
+        raise NotImplementedError(f"Auth method “{method}” not supported.")
 
+    # --------------------- OAuth2 helper factories ----------------------- #
+    def construct_oauth_client(self, cfg: OAuth2AuthorizationCodeFlowConfig) -> AsyncOAuth2Client:
+        """
+        Separated for easy overriding in tests (to inject ASGITransport).
+        """
+        client = AsyncOAuth2Client(
+            client_id=cfg.client_id,
+            client_secret=cfg.client_secret,
+            redirect_uri=cfg.redirect_uri,
+            scope=" ".join(cfg.scopes) if cfg.scopes else None,
+            token_endpoint=cfg.token_url,
+            token_endpoint_auth_method=cfg.token_endpoint_auth_method,
+            code_challenge_method="S256" if cfg.use_pkce else None,
+        )
+        self._oauth_client = client
+        return client
+
+    # --------------------------- HTTP Basic ------------------------------ #
     @staticmethod
     def _handle_http_basic() -> AuthenticatedContext:
         username = click.prompt("Username", type=str)
         password = click.prompt("Password", type=str, hide_input=True)
 
-        return AuthenticatedContext(headers={"Authorization": f"Bearer {username}:{password}"},
-                                    metadata={
-                                        "username": username, "password": password
-                                    })
+        import base64
+        credentials = f"{username}:{password}"
+        encoded_credentials = base64.b64encode(credentials.encode("utf-8")).decode("ascii")
 
-    @staticmethod
-    async def _handle_oauth2_auth_code_flow(config: OAuth2AuthorizationCodeFlowConfig) -> AuthenticatedContext:
-        state = secrets.token_urlsafe(16)
-        flow_state = _FlowState()
-
-        client = AsyncOAuth2Client(
-            client_id=config.client_id,
-            client_secret=config.client_secret,
-            redirect_uri=config.redirect_uri,
-            scope=" ".join(config.scopes) if config.scopes else None,
-            token_endpoint=config.token_url,
-            code_challenge_method='S256' if config.use_pkce else None,
+        return AuthenticatedContext(
+            headers={"Authorization": f"Bearer {encoded_credentials}"},
+            metadata={
+                "username": username, "password": password
+            },
         )
 
-        if config.use_pkce:
+    # --------------------- OAuth2 Authorization‑Code --------------------- #
+    async def _handle_oauth2_auth_code_flow(self, cfg: OAuth2AuthorizationCodeFlowConfig) -> AuthenticatedContext:
+        state = secrets.token_urlsafe(16)
+        flow_state = _FlowState()
+        client = self.construct_oauth_client(cfg)
+
+        # PKCE bits
+        if cfg.use_pkce:
             verifier, challenge = pkce.generate_pkce_pair()
             flow_state.verifier = verifier
             flow_state.challenge = challenge
 
-        authorization_url, _ = client.create_authorization_url(
-            config.authorization_url,
+        auth_url, _ = client.create_authorization_url(
+            cfg.authorization_url,
             state=state,
-            code_verifier=flow_state.verifier if config.use_pkce else None,
-            code_challenge=flow_state.challenge if config.use_pkce else None
+            code_verifier=flow_state.verifier if cfg.use_pkce else None,
+            code_challenge=flow_state.challenge if cfg.use_pkce else None,
+            **(cfg.authorization_kwargs or {})
         )
 
-        async with ConsoleAuthenticationFlowHandler._server_lock:
-            if ConsoleAuthenticationFlowHandler._server_controller is None:
-                await ConsoleAuthenticationFlowHandler._start_redirect_server(config)
-            ConsoleAuthenticationFlowHandler._flows[state] = flow_state
-            ConsoleAuthenticationFlowHandler._active_flows += 1
+        # Register flow + maybe spin up redirect handler
+        async with self._server_lock:
+            if self._server_controller is None and cfg.run_local_redirect_server:
+                await self._start_redirect_server(cfg)
+            elif not cfg.run_local_redirect_server and self._redirect_app is None:
+                await self._start_redirect_server(cfg)
+            self._flows[state] = flow_state
+            self._active_flows += 1
 
-        click.echo("Your browser has been opened to complete the authentication.")
-        webbrowser.open(authorization_url)
+        click.echo("Your browser has been opened for authentication.")
+        webbrowser.open(auth_url)
 
+        # Wait for the redirect to land
         try:
-            await asyncio.wait_for(flow_state.event.wait(), timeout=300)
+            token = await asyncio.wait_for(flow_state.future, timeout=300)
         except asyncio.TimeoutError:
-            raise RuntimeError("Authentication flow timed out after 5 minutes.")
+            raise RuntimeError("Authentication timed out (5 min).")
         finally:
-            async with ConsoleAuthenticationFlowHandler._server_lock:
-                if state in ConsoleAuthenticationFlowHandler._flows:
-                    del ConsoleAuthenticationFlowHandler._flows[state]
-                ConsoleAuthenticationFlowHandler._active_flows -= 1
-                if ConsoleAuthenticationFlowHandler._active_flows == 0:
-                    await ConsoleAuthenticationFlowHandler._stop_redirect_server()
+            async with self._server_lock:
+                self._flows.pop(state, None)
+                self._active_flows -= 1
+                if self._active_flows == 0 and cfg.run_local_redirect_server:
+                    await self._stop_redirect_server()
+                if self._active_flows == 0 and not cfg.run_local_redirect_server:
+                    self._redirect_app = None
 
-        if flow_state.error:
-            raise RuntimeError(f"Authentication failed: {flow_state.error}") from flow_state.error
-        if not flow_state.token:
-            raise RuntimeError("Authentication failed: Did not receive token.")
+        return AuthenticatedContext(
+            headers={"Authorization": f"Bearer {token['access_token']}"},
+            metadata={
+                "expires_at": token.get("expires_at"), "raw_token": token
+            },
+        )
 
-        token = flow_state.token
-
-        return AuthenticatedContext(headers={"Authorization": f"Bearer {token['access_token']}"},
-                                    metadata={
-                                        "expires_at": token.get("expires_at"), "raw_token": token
-                                    })
-
-    @staticmethod
-    async def _start_redirect_server(config: OAuth2AuthorizationCodeFlowConfig) -> None:
+    # --------------- redirect server / in‑process app -------------------- #
+    async def _start_redirect_server(self, cfg: OAuth2AuthorizationCodeFlowConfig) -> None:
+        """
+        * If cfg.run_redirect_local_server == True → start a uvicorn server (old behaviour).
+        * Else → only build the FastAPI app and save it to `self._redirect_app`
+                 for in‑process testing with ASGITransport.
+        """
         app = FastAPI()
 
-        @app.get(config.redirect_path)
+        @app.get(cfg.redirect_path)
         async def handle_redirect(request: Request):
             state = request.query_params.get("state")
-            if not state or state not in ConsoleAuthenticationFlowHandler._flows:
-                return "Invalid state. Please restart the authentication process."
-
-            flow_state = ConsoleAuthenticationFlowHandler._flows[state]
-            verifier = flow_state.verifier
-
-            client = AsyncOAuth2Client(client_id=config.client_id,
-                                       client_secret=config.client_secret,
-                                       redirect_uri=config.redirect_uri,
-                                       scope=" ".join(config.scopes) if config.scopes else None,
-                                       token_endpoint=config.token_url,
-                                       token_endpoint_auth_method=config.token_endpoint_auth_method,
-                                       code_challenge_method='S256' if config.use_pkce else None)
+            if not state or state not in self._flows:
+                return "Invalid state; restart authentication."
+            flow_state = self._flows[state]
             try:
-                flow_state.token = await client.fetch_token(url=config.token_url,
-                                                            authorization_response=str(request.url),
-                                                            code_verifier=verifier if config.use_pkce else None,
-                                                            state=state)
-            except Exception as e:
-                flow_state.error = e
-            finally:
-                flow_state.event.set()
-            return "Authentication successful! You can close this window."
+                token = await self._oauth_client.fetch_token(  # type: ignore[arg-type]
+                    url=cfg.token_url,
+                    authorization_response=str(request.url),
+                    code_verifier=flow_state.verifier if cfg.use_pkce else None,
+                    state=state,
+                )
+                flow_state.future.set_result(token)
+            except Exception as exc:  # noqa: BLE001
+                flow_state.future.set_exception(exc)
+            return "Authentication successful – you may close this tab."
 
+        # ----------- Option A: in‑process (tests) or external service configured --------------------- #
+        if not cfg.run_local_redirect_server:
+            # Nothing else to spin up – expose the app for the test.
+            self._redirect_app = app
+            return
+
+        # ----------- Option B: real uvicorn server -------------------- #
         controller = _FastApiFrontEndController(app)
-        ConsoleAuthenticationFlowHandler._server_controller = controller
+        self._server_controller = controller
+        await self._start_server_task(cfg)
+        # Give uvicorn a moment to bind sockets before we return
+        await asyncio.sleep(0.3)
 
-        asyncio.create_task(controller.start_server(host=config.client_server_host, port=config.client_server_port))
-        await asyncio.sleep(1)
+    async def _start_server_task(self, cfg: OAuth2AuthorizationCodeFlowConfig) -> None:
+        if not self._server_controller:
+            raise RuntimeError("Server controller uninitialised.")
+        try:
+            asyncio.create_task(
+                self._server_controller.start_server(host="localhost", port=cfg.local_redirect_server_port))
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Failed to start redirect server: {exc}") from exc
 
-    @staticmethod
-    async def _stop_redirect_server():
-        if ConsoleAuthenticationFlowHandler._server_controller:
-            await ConsoleAuthenticationFlowHandler._server_controller.stop_server()
-            ConsoleAuthenticationFlowHandler._server_controller = None
+    async def _stop_redirect_server(self) -> None:
+        if self._server_controller:
+            await self._server_controller.stop_server()
+            self._server_controller = None
+
+    # ------------------------- test helpers ------------------------------ #
+    @property
+    def redirect_app(self) -> FastAPI | None:
+        """
+        In “test‑mode” (run_redirect_local_server=False) the in‑memory FastAPI
+        app is exposed so you can mount it on `httpx.ASGITransport`.
+        """
+        return self._redirect_app

@@ -18,7 +18,8 @@ limitations under the License.
 # Using Authentication in the NeMo Agent Toolkit
 This example demonstrates how to use the library's native support for authentication to allow agents to use tools that require
 authentication to use. Particularly, this example highlights how to use the `OAuth 2.0 Authorization Code Flow` to authenticate
-with a demonstrative `OAuth 2.0` provider and then return the result of a tool that provides info about a given IP.
+with a demonstrative `OAuth 2.0` provider and then return information from the authorization server's demonstrative `api/me` endpoint
+which provides information about the authenticated user.
 
 ## How the OAuth2.0 Authorization‑Code Flow Works
 
@@ -99,32 +100,17 @@ Browse to **`http://127.0.0.1:5000/`** – you should see the demo home page. Si
 
 
 ## Deploy the NeMo Agent Toolkit UI
-Follow the instructions at the GitHub repository to deploy the [NeMo Agent Toolkit UI](https://github.com/NVIDIA/NeMo-Agent-Toolkit-UI)
+Follow the instructions at the GitHub repository to deploy the [NeMo Agent Toolkit UI](../../../external/aiqtoolkit-opensource-ui/)
 to deploy the UI that works with the agent in this example. Configure it according to the instructions in the README.
 
-## Update Your Agent Configuration
+## Update Your Environment Variables
 
-Update your agent's configuration file located at `examples/authentication/simple_auth/confgis/config.yml` to include the OAuth 2.0 settings. 
+Export your saved client ID and secret to the following environment variables:
 
-Here is an example configuration. You should only need to modify the `client_id` and `client_secret` fields with the 
-values you copied from the dummy client registration step above.
-
-```yaml
-authentication:
-  test_auth_provider:
-    _type: oauth2_authorization_code 
-    client_server_host: "localhost"
-    client_server_port: 8000
-    authorization_url: http://127.0.0.1:5000/oauth/authorize
-    token_url: http://127.0.0.1:5000/oauth/token
-    token_endpoint_auth_method: client_secret_post
-    scope:
-      - openid
-      - profile
-      - email
-    client_id: <YOUR COPIED CLIENT ID>
-    client_secret: <YOUR COPIED CLIENT SECRET>
-```
+```bash
+export OAUTH_CLIENT_ID=<your_client_id>
+export OAUTH_CLIENT_SECRET=<your_client_secret>
+````
 
 ## Serve The Agent
 
@@ -148,7 +134,7 @@ Once you've successfully connected to the websocket, you can start querying the 
 information about the IP address in question: 
 
 ```text
-Can you give me information about the IP address 8.8.8.8 ? 
+Who am I logged in as?
 ```
 
 **Tip**: Remember to enable pop-ups in your browser to allow the OAuth 2.0 provider to open a new window for authentication.

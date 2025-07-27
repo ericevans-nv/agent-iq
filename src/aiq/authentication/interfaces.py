@@ -40,7 +40,7 @@ class AuthenticationClientBase(ABC):
         self.config = config
 
     @abstractmethod
-    async def authenticate(self, user_id: str | None) -> AuthResult:
+    async def authenticate(self, user_id: str | None = None) -> AuthResult:
         """
         Perform the authentication process for the client.
 
@@ -64,8 +64,8 @@ class FlowHandlerBase(ABC):
     The `authenticate` method will be stored as the callback in the AIQContextState.user_auth_callback
     """
 
-    @staticmethod
-    async def authenticate(config: AuthenticationBaseConfig, method: AuthFlowType) -> AuthenticatedContext:
+    @abstractmethod
+    async def authenticate(self, config: AuthenticationBaseConfig, method: AuthFlowType) -> AuthenticatedContext:
         """
         Perform the authentication process for the client.
 
