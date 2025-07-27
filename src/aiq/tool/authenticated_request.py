@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 async def make_authenticated_request(url: str,
                                      auth_client: AuthenticationClientBase,
-                                     user_id: str | None = None,
+                                     user_id: str,
                                      method: str | HTTPMethod = HTTPMethod.GET,
                                      headers: str | dict | None = None,
                                      params: str | dict | None = None,
@@ -68,15 +68,11 @@ async def make_authenticated_request(url: str,
         params_dict = HTTPRequestValidator.validate_query_parameters(params)
         json_data_dict = HTTPRequestValidator.validate_body_data(body_data)
 
-        # Use provided parameters or fall back to defaults
-        effective_user_id = user_id or "default"
-        effective_timeout = timeout or 30
-
         # Perform authentication using the auth provider
-        auth_result: AuthResult = await auth_client.authenticate(user_id=effective_user_id)
+        auth_result: AuthResult = await auth_client.authenticate(user_id=user_id)
 
         if not auth_result or not auth_result.credentials:
-            raise RuntimeError(f"Authentication failed for user '{effective_user_id}': No credentials received")
+            raise RuntimeError(f"Authentication failed for user '{user_id}': No credentials received")
 
         # Get authentication kwargs (headers, params, cookies, auth)
         auth_kwargs = auth_result.as_requests_kwargs()
@@ -88,7 +84,7 @@ async def make_authenticated_request(url: str,
         merged_params = {**(auth_kwargs.get("params", {})), **(params_dict or {})}
 
         # Prepare request kwargs with merged values
-        request_kwargs = {"headers": merged_headers, "params": merged_params, "timeout": effective_timeout}
+        request_kwargs = {"headers": merged_headers, "params": merged_params, "timeout": timeout}
 
         # Add cookies if present in auth
         if auth_kwargs.get("cookies"):

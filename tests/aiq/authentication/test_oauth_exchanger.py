@@ -52,7 +52,7 @@ def cfg() -> OAuth2AuthorizationCodeFlowConfig:
                                              client_secret="secret",
                                              authorization_url="https://example.com/auth",
                                              token_url="https://example.com/token",
-                                             scopes=["openid", "profile"],
+                                             scope=["openid", "profile"],
                                              use_pkce=True,
                                              client_url="http://localhost:9000")
 

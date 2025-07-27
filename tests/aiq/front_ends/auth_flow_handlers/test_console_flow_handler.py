@@ -53,7 +53,7 @@ class _TestHandler(ConsoleAuthenticationFlowHandler):
             client_id=cfg.client_id,
             client_secret=cfg.client_secret,
             redirect_uri=cfg.redirect_uri,
-            scope=" ".join(cfg.scopes) if cfg.scopes else None,
+            scope=" ".join(cfg.scope) if cfg.scope else None,
             token_endpoint=cfg.token_url,
             base_url="http://testserver",  # matches host passed below
             transport=transport,
@@ -98,7 +98,7 @@ async def test_oauth2_flow_in_process(monkeypatch, mock_server):
         client_secret="secret",
         authorization_url="http://testserver/oauth/authorize",
         token_url="http://testserver/oauth/token",
-        scopes=["read"],
+        scope=["read"],
         use_pkce=True,
         run_local_redirect_server=False,  # ← key line: no uvicorn
         client_url=f"http://localhost:{redirect_port}",

@@ -153,19 +153,13 @@ Credential = typing.Annotated[
 class AuthResult(BaseModel):
     credentials: list[Credential]
     token_expires_at: datetime | None = None
-    access_token: str | None = None
-    refresh_token: str | None = None
     raw: dict[str, typing.Any] = {}  # idP / debug blob
 
     model_config = ConfigDict(extra="forbid")
 
     # ---------- helpers -------------------------------------------------------
     def is_expired(self) -> bool:
-        if (self.access_token and (self.token_expires_at is not None)
-                and (datetime.now(timezone.utc) <= self.token_expires_at)):
-            return True
-        else:
-            return False
+        return bool(self.token_expires_at and datetime.now(timezone.utc) >= self.token_expires_at)
 
     def as_requests_kwargs(self) -> dict[str, typing.Any]:
         """Convert to kwargs usable by `requests` / `httpx`."""

@@ -61,29 +61,42 @@ async def auth_tool(config: AuthTool, builder: Builder):
     yield FunctionInfo.from_fn(_arun, description="Perform authentication with a given user ID.")
 
 
-class AuthenticatedRequestTool(FunctionBaseConfig, name="authenticated_request_tool"):
+class AuthenticatedRequestConfig(FunctionBaseConfig, name="authenticated_request_function"):
     """Make authenticated HTTP requests using an authentication provider."""
-    auth_provider: AuthenticationRef = Field(description="Reference to the authentication provider "
-                                             "to use for authentication.")
+    auth_provider: AuthenticationRef = Field(description="Reference to the authentication provider to use for "
+                                             "authentication before making an authenticated request.")
     url: str = Field(description="URL to make the request to")
     method: str | HTTPMethod = Field(default=HTTPMethod.GET, description="Default HTTP method")
     headers: str | dict | None = Field(default=None, description="Default headers")
     params: str | dict | None = Field(default=None, description="Default query parameters")
     body_data: str | dict | None = Field(default=None, description="Default request body")
     timeout: int = Field(default=30, description="Default timeout in seconds for HTTP requests")
-    user_id: str = Field(default="default", description="Default user ID to use for authentication")
+    user_id: str | None = Field(default="default", description="Default user ID to use for authentication")
 
 
-@register_function(config_type=AuthenticatedRequestTool)
-async def authenticated_request_tool(config: AuthenticatedRequestTool, builder: Builder):
+@register_function(config_type=AuthenticatedRequestConfig)
+async def authenticated_request_function(config: AuthenticatedRequestConfig, builder: Builder):
     """
-    Makes authenticated HTTP requests using the configured authentication provider.
+    Make authenticated HTTP requests to protected APIs.
+
+    This tool automatically handles user authentication, applies proper authentication
+    headers/parameters, manages token refresh, and returns structured responses.
     """
     auth_client: AuthenticationClientBase = await builder.get_authentication(config.auth_provider)
 
-    async def _arun(user_id: str) -> str:
+    async def _arun(user_id: str | None = "default") -> str:
+        """
+        Make an authenticated HTTP request to the configured endpoint.
+
+        Args:
+            user_id: Optional user identifier. Uses configured default if not provided.
+
+        Returns:
+            str: JSON string containing the API response data and metadata.
+        """
+
         try:
-            # Make the authenticated request using the standalone function
+            # Make the authenticated request using the utility function
             response: HTTPResponse = await make_authenticated_request(url=config.url,
                                                                       auth_client=auth_client,
                                                                       method=config.method,
@@ -93,14 +106,29 @@ async def authenticated_request_tool(config: AuthenticatedRequestTool, builder: 
                                                                       user_id=config.user_id,
                                                                       timeout=config.timeout)
 
-            # Convert HTTPResponse to JSON string for agent compatibility
-            return response.model_dump_json(indent=2)
+            # Return structured response as JSON string
+            if response.body is None:
+                raise RuntimeError("No response body received from authenticated request")
+            return response.body
 
         except Exception as e:
+            error_msg = f"Authenticated request failed: {str(e)}"
             logger.exception("Authenticated request failed", exc_info=True)
-            return f"Authenticated request failed: {str(e)}"
+
+            # Return error in consistent format
+            error_response = {
+                "status_code": 500,
+                "body": {
+                    "error": "Request failed",
+                    "message": error_msg,
+                    "url": config.url,
+                    "method": config.method.value if isinstance(config.method, HTTPMethod) else config.method
+                },
+                "content_type": "application/json"
+            }
+            return str(error_response).replace("'", '"')
 
     yield FunctionInfo.from_fn(_arun,
-                               description="Make authenticated HTTP requests using the configured auth provider. "
-                               "Automatically handles authentication, credential refresh, and applies proper "
-                               "authentication headers/parameters to requests.")
+                               description="Call protected APIs that require authentication. Use this tool to make "
+                               "requests to secured endpoints - authentication and credential management "
+                               "are handled automatically.")

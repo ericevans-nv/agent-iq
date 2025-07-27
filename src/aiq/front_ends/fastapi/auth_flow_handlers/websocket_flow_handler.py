@@ -15,7 +15,6 @@
 
 import asyncio
 import logging
-import secrets
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -65,7 +64,7 @@ class WebSocketAuthenticationFlowHandler(FlowHandlerBase):
         return AsyncOAuth2Client(client_id=config.client_id,
                                  client_secret=config.client_secret,
                                  redirect_uri=config.redirect_uri,
-                                 scope=" ".join(config.scopes) if config.scopes else None,
+                                 scope=" ".join(config.scope) if config.scope else None,
                                  token_endpoint=config.token_url,
                                  code_challenge_method='S256' if config.use_pkce else None,
                                  token_endpoint_auth_method=config.token_endpoint_auth_method)
@@ -76,7 +75,6 @@ class WebSocketAuthenticationFlowHandler(FlowHandlerBase):
             logger.warning("Running a local redirect server is not supported in the WebSocket flow handler. Ignoring "
                            "this setting.")
 
-        state = secrets.token_urlsafe(16)
         flow_state = FlowState(config=config)
 
         flow_state.client = self.create_oauth_client(config)
@@ -86,9 +84,8 @@ class WebSocketAuthenticationFlowHandler(FlowHandlerBase):
             flow_state.verifier = verifier
             flow_state.challenge = challenge
 
-        authorization_url, _ = flow_state.client.create_authorization_url(
+        authorization_url, state = flow_state.client.create_authorization_url(
             config.authorization_url,
-            state=state,
             code_verifier=flow_state.verifier if config.use_pkce else None,
             code_challenge=flow_state.challenge if config.use_pkce else None,
             **(config.authorization_kwargs or {})

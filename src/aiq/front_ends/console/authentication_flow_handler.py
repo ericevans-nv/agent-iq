@@ -85,7 +85,7 @@ class ConsoleAuthenticationFlowHandler(FlowHandlerBase):
             client_id=cfg.client_id,
             client_secret=cfg.client_secret,
             redirect_uri=cfg.redirect_uri,
-            scope=" ".join(cfg.scopes) if cfg.scopes else None,
+            scope=" ".join(cfg.scope) if cfg.scope else None,
             token_endpoint=cfg.token_url,
             token_endpoint_auth_method=cfg.token_endpoint_auth_method,
             code_challenge_method="S256" if cfg.use_pkce else None,

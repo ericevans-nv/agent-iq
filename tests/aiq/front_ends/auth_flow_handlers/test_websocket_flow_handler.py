@@ -154,7 +154,7 @@ async def test_websocket_oauth2_flow(monkeypatch, mock_server):
         client_secret="secret",
         authorization_url="http://testserver/oauth/authorize",
         token_url="http://testserver/oauth/token",
-        scopes=["read"],
+        scope=["read"],
         use_pkce=True,
         run_local_redirect_server=False,  # no uvicorn
         client_url=f"http://localhost:{redirect_port}",
