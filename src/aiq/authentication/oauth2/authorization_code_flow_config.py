@@ -105,7 +105,7 @@ class OAuth2AuthorizationCodeFlowConfig(AuthenticationBaseConfig, name="oauth2_a
 
     @field_validator('client_url')
     @classmethod
-    def validate_client_server_url(cls, value: str) -> str:
+    def validate_client_url(cls, value: str) -> str:
         """
         Validate client_url field value.
         """
