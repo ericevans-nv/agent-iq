@@ -74,29 +74,14 @@ async def make_authenticated_request(url: str,
         if not auth_result or not auth_result.credentials:
             raise RuntimeError(f"Authentication failed for user '{user_id}': No credentials received")
 
-        # Get authentication kwargs (headers, params, cookies, auth)
-        auth_kwargs = auth_result.as_requests_kwargs()
-
-        # Merge headers: user-provided headers take precedence over auth headers
-        merged_headers = {**(auth_kwargs.get("headers", {})), **(headers_dict or {})}
-
-        # Merge query parameters: user-provided params take precedence over auth params
-        merged_params = {**(auth_kwargs.get("params", {})), **(params_dict or {})}
-
-        # Prepare request kwargs with merged values
-        request_kwargs = {"headers": merged_headers, "params": merged_params, "timeout": timeout}
-
-        # Add cookies if present in auth
-        if auth_kwargs.get("cookies"):
-            request_kwargs["cookies"] = auth_kwargs["cookies"]
-
-        # Add auth tuple if present (for basic auth)
-        if auth_kwargs.get("auth"):
-            request_kwargs["auth"] = auth_kwargs["auth"]
+        request_kwargs = {"headers": headers_dict or {}, "params": params_dict or {}, "timeout": timeout or 30}
 
         # Add JSON data if provided
         if json_data_dict is not None:
             request_kwargs["json"] = json_data_dict
+
+        # Merge user-provided headers, params, cookies, and auth tuples with authentication credentials
+        auth_result.attach(request_kwargs)
 
         # Make the authenticated request
         async with httpx.AsyncClient() as client:
