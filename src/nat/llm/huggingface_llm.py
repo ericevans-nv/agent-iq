@@ -174,7 +174,7 @@ class HuggingFaceModel(BaseChatModel):
             messages: List of message objects
             stop: Optional list of stop sequences
             run_manager: Optional callback manager
-            **kwargs: Additional generation parameters
+            \\*\\*kwargs: Additional generation parameters
 
         Returns:
             ChatResult containing the generated response
@@ -204,7 +204,7 @@ class HuggingFaceModel(BaseChatModel):
             messages: List of message objects
             stop: Optional list of stop sequences
             run_manager: Optional callback manager
-            **kwargs: Additional generation parameters
+            \\*\\*kwargs: Additional generation parameters
 
         Returns:
             ChatResult containing the generated response
@@ -246,7 +246,7 @@ class HuggingFaceModel(BaseChatModel):
             messages: List of message objects
             stop: Optional list of stop sequences
             run_manager: Optional callback manager
-            **kwargs: Additional generation parameters
+            \\*\\*kwargs: Additional generation parameters
 
         Yields:
             ChatGenerationChunk objects containing token chunks
@@ -314,6 +314,7 @@ class HuggingFaceModel(BaseChatModel):
 
 async def _cleanup_model(model_name: str) -> None:
     """Clean up a loaded model and free GPU memory.
+
     Args:
         model_name: Name of the model to clean up.
     """

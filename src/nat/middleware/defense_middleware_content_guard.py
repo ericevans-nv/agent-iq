@@ -63,11 +63,12 @@ class ContentSafetyGuardMiddleware(DefenseMiddleware):
 
     Only output analysis is currently supported (target_location='output').
 
-    Streaming Behavior:
-    - For 'refusal' and 'redirection' actions: Chunks are buffered and checked before yielding
-      to prevent unsafe content from being streamed to clients.
-    - For 'partial_compliance' action: Chunks are yielded immediately; violations are logged
-      but content passes through.
+    Streaming Behavior::
+
+        - For 'refusal' and 'redirection' actions: Chunks are buffered and checked before yielding
+          to prevent unsafe content from being streamed to clients.
+        - For 'partial_compliance' action: Chunks are yielded immediately; violations are logged
+          but content passes through.
     """
 
     def __init__(self, config: ContentSafetyGuardMiddlewareConfig, builder):
@@ -157,11 +158,13 @@ class ContentSafetyGuardMiddleware(DefenseMiddleware):
 
         Searches for "Safe" or "Unsafe" keywords anywhere in the response (case-insensitive).
         Works with any guard model format that includes these keywords:
+        
         - JSON: {"User Safety": "unsafe", "Safety Categories": "..."}
-        - Structured text: Safety: Unsafe\nCategories: Violent
+        - Structured text: Safety: Unsafe  Categories: Violent
         - Plain text: Any text containing "Unsafe" or "Safe"
 
         Also extracts safety categories from both formats:
+        
         - JSON: Extracts "Safety Categories" field
         - Text: Extracts text after "Categories:" or "Category:"
 

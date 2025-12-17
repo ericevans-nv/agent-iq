@@ -43,10 +43,11 @@ class OutputVerifierMiddlewareConfig(DefenseMiddlewareConfig, name="output_verif
     This middleware analyzes function outputs using an LLM to verify correctness,
     detect security threats, and provide corrections when needed.
 
-    Actions:
-    - 'partial_compliance': Detect and log threats, but allow content to pass through
-    - 'refusal': Block output if threat detected (hard stop)
-    - 'redirection': Replace incorrect output with correct answer from LLM
+    Actions::
+
+        - 'partial_compliance': Detect and log threats, but allow content to pass through
+        - 'refusal': Block output if threat detected (hard stop)
+        - 'redirection': Replace incorrect output with correct answer from LLM
 
     Note: Only output analysis is currently supported (target_location='output').
     """
@@ -62,18 +63,20 @@ class OutputVerifierMiddlewareConfig(DefenseMiddlewareConfig, name="output_verif
 class OutputVerifierMiddleware(DefenseMiddleware):
     """Verification middleware using an LLM for correctness and security.
 
-    This middleware uses NAT's LLM system to verify function outputs for:
-    - Correctness and reasonableness
-    - Security validation (detecting malicious content and manipulated values)
-    - Providing automatic corrections when errors are detected
+    This middleware uses NAT's LLM system to verify function outputs for::
+
+        - Correctness and reasonableness
+        - Security validation (detecting malicious content and manipulated values)
+        - Providing automatic corrections when errors are detected
 
     Only output analysis is currently supported (target_location='output').
 
-    Streaming Behavior:
-    - For 'refusal' and 'redirection' actions: Chunks are buffered and checked before yielding
-      to prevent incorrect content from being streamed to clients.
-    - For 'partial_compliance' action: Chunks are yielded immediately; violations are logged
-      but content passes through.
+    Streaming Behavior::
+
+        - For 'refusal' and 'redirection' actions: Chunks are buffered and checked before yielding
+          to prevent incorrect content from being streamed to clients.
+        - For 'partial_compliance' action: Chunks are yielded immediately; violations are logged
+          but content passes through.
     """
 
     def __init__(self, config: OutputVerifierMiddlewareConfig, builder):
@@ -286,11 +289,12 @@ Respond ONLY with valid JSON in this exact format:
     ) -> Any:
         """Process output verification and handling for a given value.
 
-        This is a common helper method that handles:
-        - Field extraction (if target_field is specified)
-        - Output verification analysis
-        - Threat handling (refusal, redirection, partial_compliance)
-        - Applying corrected value back to original structure
+        This is a common helper method that handles::
+
+            - Field extraction (if target_field is specified)
+            - Output verification analysis
+            - Threat handling (refusal, redirection, partial_compliance)
+            - Applying corrected value back to original structure
 
         Args:
             value: The value to analyze (input or output)
