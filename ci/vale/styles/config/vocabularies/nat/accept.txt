@@ -190,9 +190,7 @@ Optuna
 [Gg]uardrail(s|ed|ing)?
 JSONPath
 [Mm]itigation(s?)
-NASSE('s)?
 Qwen
 [Rr]eputational
 [Ss]anitiz(e|ed|ation|ing)
 spaCy
-Toolkit's
