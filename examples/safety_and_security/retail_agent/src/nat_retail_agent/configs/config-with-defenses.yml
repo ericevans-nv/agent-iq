@@ -54,7 +54,7 @@ middleware:
       - EMAIL_ADDRESS
       - PERSON
   
-  # Content Safety Guard: Detect harmful/violent content in product reviews
+  # Content Safety Guard: Detect harmful or violent content in product reviews
   content_safety_guard_tools:
     _type: content_safety_guard
     llm_name: guard_llm
