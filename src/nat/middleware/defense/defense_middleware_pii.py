@@ -42,10 +42,11 @@ class PIIDefenseMiddlewareConfig(DefenseMiddlewareConfig, name="pii_defense"):
 
     See <https://github.com/microsoft/presidio> for more information about Presidio.
 
-    Actions:
-    - 'partial_compliance': Detect and log PII, but allow content to pass through
-    - 'refusal': Block content if PII detected (hard stop)
-    - 'redirection': Replace PII with anonymized placeholders (e.g., <EMAIL_ADDRESS>)
+    Actions::
+
+        - 'partial_compliance': Detect and log PII, but allow content to pass through
+        - 'refusal': Block content if PII detected (hard stop)
+        - 'redirection': Replace PII with anonymized placeholders (e.g., <EMAIL_ADDRESS>)
 
     Note: Only output analysis is currently supported (target_location='output').
     """
@@ -71,11 +72,12 @@ class PIIDefenseMiddleware(DefenseMiddleware):
 
     See <https://github.com/microsoft/presidio> for more information about Presidio.
 
-    Streaming Behavior:
-    - For 'refusal' and 'redirection' actions: Chunks are buffered and checked before yielding
-      to prevent PII from being streamed to clients.
-    - For 'partial_compliance' action: Chunks are yielded immediately; violations are logged
-      but content passes through.
+    Streaming Behavior::
+    
+        - For 'refusal' and 'redirection' actions: Chunks are buffered and checked before yielding
+          to prevent PII from being streamed to clients.
+        - For 'partial_compliance' action: Chunks are yielded immediately; violations are logged
+          but content passes through.
     """
 
     def __init__(self, config: PIIDefenseMiddlewareConfig, builder):
