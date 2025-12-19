@@ -12,12 +12,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-# isort:skip_file
-# flake8: noqa
-
-import nat.middleware.cache.register  # noqa: F401
-import nat.middleware.defense.register  # noqa: F401
-import nat.middleware.dynamic.register  # noqa: F401
-import nat.middleware.logging.register  # noqa: F401
-import nat.middleware.red_teaming.register  # noqa: F401

@@ -12,22 +12,23 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Registration for dynamic middleware."""
 
 from nat.builder.builder import Builder
 from nat.cli.register_workflow import register_middleware
-from nat.middleware.cache.cache_middleware import CacheMiddleware
-from nat.middleware.cache.cache_middleware_config import CacheMiddlewareConfig
+from nat.middleware.dynamic.dynamic_function_middleware import DynamicFunctionMiddleware
+from nat.middleware.dynamic.dynamic_middleware_config import DynamicMiddlewareConfig
 
 
-@register_middleware(config_type=CacheMiddlewareConfig)
-async def cache_middleware(config: CacheMiddlewareConfig, builder: Builder):
-    """Build a cache middleware from configuration.
+@register_middleware(config_type=DynamicMiddlewareConfig)
+async def dynamic_middleware(config: DynamicMiddlewareConfig, builder: Builder):
+    """Build a dynamic middleware from configuration.
 
     Args:
-        config: The cache middleware configuration
-        builder: The workflow builder (unused but required by component pattern)
+        config: The dynamic middleware configuration
+        builder: The workflow builder
 
     Yields:
-        A configured cache middleware instance
+        A configured dynamic middleware instance
     """
-    yield CacheMiddleware(enabled_mode=config.enabled_mode, similarity_threshold=config.similarity_threshold)
+    yield DynamicFunctionMiddleware(config=config, builder=builder)

@@ -13,11 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# isort:skip_file
-# flake8: noqa
+from pydantic import Field
 
-import nat.middleware.cache.register  # noqa: F401
-import nat.middleware.defense.register  # noqa: F401
-import nat.middleware.dynamic.register  # noqa: F401
-import nat.middleware.logging.register  # noqa: F401
-import nat.middleware.red_teaming.register  # noqa: F401
+from nat.middleware.dynamic.dynamic_middleware_config import DynamicMiddlewareConfig
+
+
+class LoggingMiddlewareConfig(DynamicMiddlewareConfig, name="logging_middleware"):
+    """Configuration for logging middleware.
+
+    Extends DynamicMiddlewareConfig to inherit all dynamic discovery features
+    (register_llms, register_workflow_functions, and so on) and the enabled toggle.
+    """
+
+    log_level: str = Field(default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR)")
