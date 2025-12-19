@@ -333,28 +333,35 @@ Respond ONLY with valid JSON in this exact format:
             # No field extraction - return sanitized content directly
             return sanitized_content
 
-    async def function_middleware_invoke(self, value: Any, call_next: CallNext,
-                                         context: FunctionMiddlewareContext) -> Any:
+    async def function_middleware_invoke(self,
+                                         *args: Any,
+                                         call_next: CallNext,
+                                         context: FunctionMiddlewareContext,
+                                         **kwargs: Any) -> Any:
         """Apply output verifier to function invocation.
 
         Analyzes function outputs for correctness and security, with auto-correction.
 
         Args:
-            value: Function input
+            *args: Positional arguments for the function (first arg is typically the input value)
             call_next: Next middleware/function to call
             context: Function metadata
+            **kwargs: Keyword arguments for the function
 
         Returns:
             Function output (potentially corrected, blocked, or sanitized)
         """
+        # Extract the input value from args
+        value = args[0] if args else None
+
         # Check if defense should apply to this function
         if not self._should_apply_defense(context.name):
             logger.debug("OutputVerifierMiddleware: Skipping %s (not targeted)", context.name)
-            return await call_next(value)
+            return await call_next(value, *args[1:], **kwargs)
 
         try:
             # Call the function
-            output = await call_next(value)
+            output = await call_next(value, *args[1:], **kwargs)
 
             # Process output verification (handles field extraction, analysis, and application)
             output = await self._process_output_verification(output, "output", context, inputs=value)
@@ -370,26 +377,31 @@ Respond ONLY with valid JSON in this exact format:
             raise
 
     async def function_middleware_stream(self,
-                                         value: Any,
+                                         *args: Any,
                                          call_next: CallNextStream,
-                                         context: FunctionMiddlewareContext) -> AsyncIterator[Any]:
+                                         context: FunctionMiddlewareContext,
+                                         **kwargs: Any) -> AsyncIterator[Any]:
         """Apply output verifier to streaming function.
 
         For 'refusal' and 'redirection' actions: Chunks are buffered and checked before yielding.
         For 'partial_compliance' action: Chunks are yielded immediately; violations are logged.
 
         Args:
-            value: Function input
+            *args: Positional arguments for the function (first arg is typically the input value)
             call_next: Next middleware/function to call
             context: Function metadata
+            **kwargs: Keyword arguments for the function
 
         Yields:
             Function output chunks (potentially corrected, blocked, or sanitized)
         """
+        # Extract the input value from args
+        value = args[0] if args else None
+
         # Check if defense should apply to this function
         if not self._should_apply_defense(context.name):
             logger.debug("OutputVerifierMiddleware: Skipping %s (not targeted)", context.name)
-            async for chunk in call_next(value):
+            async for chunk in call_next(value, *args[1:], **kwargs):
                 yield chunk
             return
 
@@ -397,7 +409,7 @@ Respond ONLY with valid JSON in this exact format:
             buffer_chunks = self.config.action in ("refusal", "redirection")
             accumulated_chunks: list[Any] = []
 
-            async for chunk in call_next(value):
+            async for chunk in call_next(value, *args[1:], **kwargs):
                 if buffer_chunks:
                     accumulated_chunks.append(chunk)
                 else:

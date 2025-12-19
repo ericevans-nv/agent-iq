@@ -54,10 +54,10 @@ class FunctionMiddleware(Middleware):
     - If disabled, middleware is skipped entirely (no methods called)
     - Users do NOT need to check ``enabled`` in their implementations
 
-    Inherited abstract members that must be implemented:
-    - enabled: Property that returns whether middleware should run
-    - pre_invoke: Transform inputs before function execution
-    - post_invoke: Transform outputs after function execution
+    Default implementations provided (override as needed):
+    - enabled: Returns True (middleware runs by default)
+    - pre_invoke: Pass-through (returns None)
+    - post_invoke: Pass-through (returns None)
 
     Context Flow:
     - FunctionMiddlewareContext (frozen): Static function metadata only
@@ -85,6 +85,21 @@ class FunctionMiddleware(Middleware):
                 logger.info(f"Result: {context.output}")
                 return None  # Pass through unchanged
     """
+
+    # ==================== Default Implementations ====================
+
+    @property
+    def enabled(self) -> bool:
+        """Whether this middleware should execute. Default: True."""
+        return True
+
+    async def pre_invoke(self, context: InvocationContext) -> InvocationContext | None:
+        """Transform inputs before execution. Default: pass-through."""
+        return None
+
+    async def post_invoke(self, context: InvocationContext) -> InvocationContext | None:
+        """Transform output after execution. Default: pass-through."""
+        return None
 
     # ==================== Middleware Delegation ====================
     async def middleware_invoke(self,
